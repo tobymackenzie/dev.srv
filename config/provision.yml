@@ -1,0 +1,245 @@
+- name: vars
+  gather_facts: no
+  hosts: all
+  no_log: true
+  tasks:
+    - name: load vars
+      include_vars: '../provision.vars.yml'
+#-@ https://stackoverflow.com/a/42635237/1139122
+- name: prepare for ansible
+  become: true
+  hosts: all
+  gather_facts: false
+  tasks:
+    - name: install python
+      changed_when:
+        - pythonInstall.stdout != ''
+        - pythonInstall.stdout != '\r\n'
+      raw: bash -c "test -e /usr/bin/python || (apt -y update && apt install -y python-is-python3)"
+      register: pythonInstall
+    - name: install acl # required for becoming different users
+      apt:
+        name: acl
+        state: present
+- name: update packages
+  become: true
+  hosts: all
+  tasks:
+    - name: update packages
+      apt:
+        cache_valid_time: 86400
+        upgrade: dist
+        update_cache: yes
+- name: install db
+  become: true
+  hosts: all
+  tasks:
+    - name: install mysql
+      apt:
+        name:
+          - mysql-client
+          - mysql-server
+        state: present
+- name: manage filesystem permissions
+  become: true
+  hosts: all
+  tasks:
+    - name: allow staff to edit '/usr/local/bin' files
+      file:
+        group: staff #--allow limited privilege updates
+        mode: '2775'
+        owner: root
+        path: /usr/local/bin
+- name: install web
+  become: true
+  handlers:
+    - name: restart apache
+      command: 'apachectl graceful'
+      listen: 'apache conf change'
+    - name: restart php
+      service:
+        name: 'php{{phpVersion}}-fpm'
+        state: restarted
+  hosts: all
+  tasks:
+    - name: install apache
+      apt:
+        name: apache2
+        state: present
+    - name: install php
+      apt:
+        name:
+          - imagemagick
+          - php
+          - php-cli
+          - php-curl
+          - php-fpm
+          - php-imagick
+          - php-gd
+          - php-intl
+          - php-mbstring
+          - php-mysql
+          - php-xml
+          - php-zip #-- for composer
+        state: present
+      notify: 'restart php'
+    - name: configure server name
+      lineinfile:
+        dest: /etc/apache2/apache2.conf
+        line: 'ServerName {{serverName}}'
+        regexp: '^ServerName.*$'
+        state: present
+      notify: 'restart apache'
+    - name:
+      lineinfile:
+        backrefs: true
+        dest: '/etc/apache2/sites-enabled/000-default.conf'
+        line: '\1/sites'
+        regexp: '^(\s+DocumentRoot /var/www).*$'
+        state: present
+    - name: enable vhost_alias for auto-domains
+      apache2_module:
+        name: vhost_alias
+        state: present
+      notify: 'restart apache'
+    - name: install default vhost file
+      template:
+        dest: /etc/apache2/sites-available/000-default.conf
+        src: vhosts.dev.l.conf.j2
+      notify: 'restart apache'
+    - name: install vhost file for auto domains
+      copy:
+        dest: /etc/apache2/sites-enabled/zzz-vhosts.conf
+        src: vhosts.l.conf
+      notify: 'restart apache'
+    - name: configure vhost log format
+      lineinfile:
+        dest: /etc/apache2/apache2.conf
+        line: 'LogFormat "%V:%{local}p %h %l %u %t \"%r\" %>s %O \"%{Referer}i\" \"%{User-Agent}i\"" vhost_combined'
+        regexp: '^LogFormat.*vhost_combined$'
+        state: present
+      notify: 'restart apache'
+    - name: disable php module #--needed for mpm module switch
+      apache2_module:
+        name: 'php{{phpVersion}}'
+        state: absent
+      notify: 'restart apache'
+    - name: remove h2 incompatible mpm
+      apache2_module:
+        ignore_configcheck: true #--needed for removing mpm module
+        name: mpm_prefork
+        state: absent
+    - name: add h2 compatible mpm
+      apache2_module:
+        ignore_configcheck: true #--needed for adding mpm module
+        name: mpm_event
+        state: present
+    - name: enable mod_expires
+      apache2_module:
+        name: expires
+        state: present
+      notify: 'restart apache'
+    - name: enable mod_headers
+      apache2_module:
+        name: headers
+        state: present
+      notify: 'restart apache'
+    - name: enable mod_rewrite
+      apache2_module:
+        name: rewrite
+        state: present
+      notify: 'restart apache'
+    - name: enable php module for apache
+      apache2_module:
+        name: proxy_fcgi
+    - name: disable cgi-bin path
+      #-# we're not using cgi-bin dir and it takes a usable url path
+      command: a2disconf serve-cgi-bin
+      args:
+        removes: /etc/apache2/conf-enabled/serve-cgi-bin.conf
+      notify: 'restart apache'
+    - name: enable php conf for apache
+      command: 'a2enconf php{{phpVersion}}-fpm' #-! version embedded
+      args:
+        creates: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
+      notify: 'restart apache'
+    - name: handle phps files as php
+      #-# simplest way to allow `.phps` urls to be accessed without risk of exposing code
+      lineinfile:
+        dest: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
+        line: '    <FilesMatch ".+\.ph(ar|p|ps|tml)$">'
+        regexp: '<FilesMatch "\.\+\\\.ph\(ar'
+        state: present
+      notify: 'restart apache'
+    #--allow as many paths as possible
+    - name: allow access to nameless php and phps files
+      #-# mainly doing this because some bot is hitting `/.php` and throwing an error in the log. don't really know of a danger of allowing access to that file
+      replace:
+        dest: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
+        replace: '# Require all denied'
+        regexp: '#?\s?Require all denied'
+      notify: 'restart apache'
+    #--allow as many paths as possible
+    - name: allow access to safe .ht prefixed files
+      lineinfile:
+        dest: /etc/apache2/apache2.conf
+        line: '<FilesMatch "^\.ht(access|passwd)$">'
+        regexp: '^\s*<FilesMatch\s+"\^\\\.ht'
+        state: present
+      notify: 'restart apache'
+    - name: add woff2 mime type
+      lineinfile:
+        dest: /etc/mime.types
+        line: 'font/woff2                          woff2'
+        regexp: '^.*woff2$'
+        state: present
+      notify: 'restart apache'
+- name: install build
+  become: true
+  hosts: all
+  tasks:
+    - name: install phpunit
+      apt:
+        name:
+          - phpunit
+        state: present
+    - name: install css build packages
+      apt:
+        name:
+          - node-postcss
+          - sassc
+        state: present
+    - name: install js build packages
+      apt:
+        name:
+          - rollup
+          - uglifyjs
+        state: present
+    - name: check composer's existence
+      stat:
+        path: '/usr/local/bin/composer'
+      register: isComposerInstalled
+    - name: get composer
+      get_url:
+        dest: /tmp/composerInstall
+        url: https://getcomposer.org/installer
+      when: isComposerInstalled.stat.exists != true
+    - name: build composer
+      become: true
+      become_user: '{{adminUser}}' #--limited privileges
+      command: 'php /tmp/composerInstall --filename=composer --install-dir=/tmp'
+      when: isComposerInstalled.stat.exists != true
+    - name: install composer
+      command: 'mv /tmp/composer /usr/local/bin/composer'
+      when: isComposerInstalled.stat.exists != true
+    - name: clean composer installation
+      file:
+        path: /tmp/composerInstall
+        state: absent
+      when: isComposerInstalled.stat.exists != true
+    - name: set composer permissions
+      file:
+        group: staff #--allow limited privilege updates
+        mode: 0775
+        owner: root
+        path: /usr/local/bin/composer
