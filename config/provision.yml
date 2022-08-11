@@ -163,6 +163,20 @@
       args:
         creates: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
       notify: 'restart apache'
+    - name: set php fpm user
+      lineinfile:
+        dest: '/etc/php/{{phpVersion}}/fpm/pool.d/www.conf'
+        line: 'user = vagrant'
+        regexp: '^user = '
+        state: present
+      notify: 'restart php'
+    - name: set php fpm group
+      lineinfile:
+        dest: '/etc/php/{{phpVersion}}/fpm/pool.d/www.conf'
+        line: 'group = vagrant'
+        regexp: '^group = '
+        state: present
+      notify: 'restart php'
     - name: handle phps files as php
       #-# simplest way to allow `.phps` urls to be accessed without risk of exposing code
       lineinfile:
