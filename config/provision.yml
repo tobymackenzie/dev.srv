@@ -257,3 +257,13 @@
         mode: 0775
         owner: root
         path: /usr/local/bin/composer
+- name: install utils
+  become: true
+  hosts: all
+  tasks:
+    - name: install web browsers
+      apt:
+        name:
+          - lynx
+          - w3m
+        state: present
