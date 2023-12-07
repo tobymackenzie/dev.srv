@@ -2,7 +2,8 @@ Vagrant.require_version '>= 1.7.0'
 
 Vagrant.configure(2) do |config|
 	config.vm.define 'devsrv' do |devsrv|
-		devsrv.vm.box = 'ubuntu/focal64'
+		#-# see <https://app.vagrantup.com/ubuntu>
+		devsrv.vm.box = 'ubuntu/jammy64'
 
 		#==network
 		#-# virtualbox security change limits IP available

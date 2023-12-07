@@ -66,23 +66,6 @@
       apt:
         name: apache2
         state: present
-    - name: install php
-      apt:
-        name:
-          - imagemagick
-          - php
-          - php-cli
-          - php-curl
-          - php-fpm
-          - php-imagick
-          - php-gd
-          - php-intl
-          - php-mbstring
-          - php-mysql
-          - php-xml
-          - php-zip #-- for composer
-        state: present
-      notify: 'restart php'
     - name: configure server name
       lineinfile:
         dest: /etc/apache2/apache2.conf
@@ -119,11 +102,6 @@
         regexp: '^LogFormat.*vhost_combined$'
         state: present
       notify: 'restart apache'
-    - name: disable php module #--needed for mpm module switch
-      apache2_module:
-        name: 'php{{phpVersion}}'
-        state: absent
-      notify: 'restart apache'
     - name: remove h2 incompatible mpm
       apache2_module:
         ignore_configcheck: true #--needed for removing mpm module
@@ -149,6 +127,23 @@
         name: rewrite
         state: present
       notify: 'restart apache'
+    - name: install php
+      apt:
+        name:
+          - imagemagick
+          - php
+          - php-cli
+          - php-curl
+          - php-fpm
+          - php-imagick
+          - php-gd
+          - php-intl
+          - php-mbstring
+          - php-mysql
+          - php-xml
+          - php-zip #-- for composer
+        state: present
+      notify: 'restart php'
     - name: enable php module for apache
       apache2_module:
         name: proxy_fcgi
@@ -177,21 +172,10 @@
         regexp: '^group = '
         state: present
       notify: 'restart php'
-    - name: handle phps files as php
-      #-# simplest way to allow `.phps` urls to be accessed without risk of exposing code
-      lineinfile:
-        dest: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
-        line: '    <FilesMatch ".+\.ph(ar|p|ps|tml)$">'
-        regexp: '<FilesMatch "\.\+\\\.ph\(ar'
-        state: present
-      notify: 'restart apache'
-    #--allow as many paths as possible
-    - name: allow access to nameless php and phps files
-      #-# mainly doing this because some bot is hitting `/.php` and throwing an error in the log. don't really know of a danger of allowing access to that file
-      replace:
-        dest: '/etc/apache2/conf-enabled/php{{phpVersion}}-fpm.conf'
-        replace: '# Require all denied'
-        regexp: '#?\s?Require all denied'
+    - name: handle phps files as php, allow access to nameless php and phps files
+      template:
+        dest: /etc/apache2/conf-available/php{{phpVersion}}-fpm.conf
+        src: php-fpm.conf
       notify: 'restart apache'
     #--allow as many paths as possible
     - name: allow access to safe .ht prefixed files

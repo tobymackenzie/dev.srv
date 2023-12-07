@@ -1,4 +1,4 @@
 adminUser: vagrant
 ansible_python_interpreter: '/usr/bin/python3'
-phpVersion: 7.4
+phpVersion: 8.1
 serverName: 'dev.l'
