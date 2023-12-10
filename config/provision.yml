@@ -62,6 +62,23 @@
         state: restarted
   hosts: all
   tasks:
+    - name: install php
+      apt:
+        name:
+          - imagemagick
+          - php
+          - php-cli
+          - php-curl
+          - php-fpm
+          - php-imagick
+          - php-gd
+          - php-intl
+          - php-mbstring
+          - php-mysql
+          - php-xml
+          - php-zip #-- for composer
+        state: present
+      notify: 'restart php'
     - name: install apache
       apt:
         name: apache2
@@ -102,16 +119,22 @@
         regexp: '^LogFormat.*vhost_combined$'
         state: present
       notify: 'restart apache'
-    - name: remove h2 incompatible mpm
-      apache2_module:
-        ignore_configcheck: true #--needed for removing mpm module
-        name: mpm_prefork
-        state: absent
-    - name: add h2 compatible mpm
-      apache2_module:
-        ignore_configcheck: true #--needed for adding mpm module
-        name: mpm_event
-        state: present
+    - name: remove mod_php module
+      command: a2dismod php{{phpVersion}}
+      args:
+        removes: /etc/apache2/mods-enabled/php{{phpVersion}}.conf
+      notify: 'restart apache'
+    - name: enable fpm php module for apache
+      command: a2enmod proxy_fcgi
+      args:
+        creates: /etc/apache2/mods-enabled/proxy_fcgi.load
+      notify: 'restart apache'
+    - name: switch to h2 incompatible mpm
+      #-# must restart apache here since things break without doing it immediately
+      shell: 'a2dismod mpm_prefork && a2enmod mpm_event && service apache2 restart'
+      args:
+        removes: /etc/apache2/mods-enabled/mpm_prefork.conf
+        creates: /etc/apache2/mods-enabled/mpm_event.conf
     - name: enable mod_expires
       apache2_module:
         name: expires
@@ -127,28 +150,8 @@
         name: rewrite
         state: present
       notify: 'restart apache'
-    - name: install php
-      apt:
-        name:
-          - imagemagick
-          - php
-          - php-cli
-          - php-curl
-          - php-fpm
-          - php-imagick
-          - php-gd
-          - php-intl
-          - php-mbstring
-          - php-mysql
-          - php-xml
-          - php-zip #-- for composer
-        state: present
-      notify: 'restart php'
-    - name: enable php module for apache
-      apache2_module:
-        name: proxy_fcgi
+    #-# we're not using cgi-bin dir and it takes a usable url path
     - name: disable cgi-bin path
-      #-# we're not using cgi-bin dir and it takes a usable url path
       command: a2disconf serve-cgi-bin
       args:
         removes: /etc/apache2/conf-enabled/serve-cgi-bin.conf
